@@ -1,0 +1,9 @@
+{
+  "name": "anthropic-multi-auth",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.mjs",
+  "dependencies": {
+    "@openauthjs/openauth": "^0.4.3"
+  }
+}

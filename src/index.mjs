@@ -24,7 +24,7 @@ function saveRawAuth(anthropicAuth) {
     data.anthropic = anthropicAuth;
     writeFileSync(AUTH_FILE, JSON.stringify(data, null, 2));
   } catch (e) {
-    console.error("[anthropic-multi-auth] Failed to save auth:", e);
+    console.error("[anthropic-multi-account] Failed to save auth:", e);
   }
 }
 
@@ -121,7 +121,7 @@ async function exchange(code, verifier) {
 function selectThresholdAccount(accounts, state) {
   const THRESHOLD = 0.70;  // Switch TO x20 when ANY metric > 70%
   const RECOVER = 0.60;    // Switch BACK when ALL metrics < 60%
-  const CHECK_INTERVAL = 600000; // 10 minutes in ms
+  const CHECK_INTERVAL = 3600000; // 1 hour in ms
 
   if (!accounts || accounts.length === 0) return null;
 
@@ -162,7 +162,7 @@ function selectThresholdAccount(accounts, state) {
     const maxUtil = getMaxUtilization(x5Usage);
     if (maxUtil > THRESHOLD) {
       const highest = getHighestMetric(x5Usage);
-      console.log(`[multi-auth] Switched to max-20x: max-5x ${highest.name} at ${Math.round(highest.value * 100)}%`);
+      console.log(`[multi-account] Switched to max-20x: max-5x ${highest.name} at ${Math.round(highest.value * 100)}%`);
       return x20 || accounts[1];
     }
     return x5 || accounts[0];
@@ -173,7 +173,7 @@ function selectThresholdAccount(accounts, state) {
       // Switch back only if ALL metrics < 60%
       const maxUtil = getMaxUtilization(x5Usage);
       if (maxUtil < RECOVER) {
-        console.log(`[multi-auth] Switched to max-5x: all metrics below 60%`);
+        console.log(`[multi-account] Switched to max-5x: all metrics below 60%`);
         return x5 || accounts[0];
       }
     }
@@ -239,7 +239,7 @@ export async function AnthropicAuthPlugin({ client }) {
                // Select account via threshold-based switching
                const account = selectThresholdAccount(multi.accounts, multi);
                if (!account) {
-                 throw new Error("No accounts configured for multi-auth");
+                 throw new Error("No accounts configured for multi-account");
                }
 
                // Track state for threshold logic
