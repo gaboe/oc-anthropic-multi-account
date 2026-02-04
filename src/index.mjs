@@ -134,12 +134,13 @@ async function exchange(code, verifier) {
 /**
  * Select account based on threshold logic
  * accounts[0] = primary (preferred), accounts[1..n] = fallbacks
- * Switches to fallback when primary > 70%, back when primary < 60%
+ * Config from state.config or defaults
  */
 function selectThresholdAccount(accounts, state) {
-  const THRESHOLD = 0.70;
-  const RECOVER = 0.60;
-  const CHECK_INTERVAL = 3600000; // 1 hour
+  const config = state?.config || {};
+  const THRESHOLD = config.threshold ?? 0.70;
+  const RECOVER = config.recover ?? 0.60;
+  const CHECK_INTERVAL = config.checkInterval ?? 3600000;
 
   if (!accounts || accounts.length === 0) return null;
   if (accounts.length === 1) return accounts[0];

@@ -82,24 +82,19 @@ export OPENCODE_DISABLE_DEFAULT_PLUGINS=true
 
 ### 4. Configure accounts
 
-Use the add-account utility to authenticate each account:
+Add accounts using the CLI (first = primary, rest = fallbacks):
 
 ```bash
-# Add accounts (first = primary, rest = fallbacks)
-bun src/add-account.ts primary
-bun src/add-account.ts fallback1
-bun src/add-account.ts fallback2  # optional - add as many as you want
+bun src/cli.ts add primary
+bun src/cli.ts add fallback1
+bun src/cli.ts add fallback2
 ```
 
 Name accounts whatever you want - `work`, `personal`, `max-5x`, `backup`, etc.
 
-The utility will:
-1. Generate an OAuth authorization URL
-2. You open it in browser and log in to your Anthropic Max account
-3. After approval, copy the callback URL from browser
-4. Paste it back - tokens are automatically saved
+The CLI will guide you through OAuth authentication for each account.
 
-**Important**: Each account requires a **separate Anthropic Max subscription**. Log out and log in with different credentials for each account.
+**Important**: Each account requires a **separate Anthropic Max subscription**.
 
 <details>
 <summary>Manual configuration (advanced)</summary>
@@ -132,61 +127,58 @@ Tokens are automatically refreshed when expired.
 opencode
 ```
 
-## Usage CLI
+## CLI
 
-Check current usage across accounts:
-
-```bash
-bun src/usage.ts
-```
-
-Watch mode (refreshes every 5s):
+All commands via unified CLI:
 
 ```bash
-bun src/usage.ts --watch
+bun src/cli.ts usage              # show usage
+bun src/cli.ts usage --watch      # live updates (5s)
+bun src/cli.ts config             # show config
+bun src/cli.ts config --threshold 0.80 --recover 0.70
+bun src/cli.ts config --interval 30   # recovery check interval (minutes)
+bun src/cli.ts add <account-name>     # add account via OAuth
 ```
 
 Example output:
 
 ```
 ╔══════════════════════════════════════════════════════════════════╗
-║              anthropic-multi-account usage                       ║
+║              anthropic-multi-account                             ║
 ╚══════════════════════════════════════════════════════════════════╝
 
-┌─ max-5x ◄── ACTIVE        ← cyan border for active account
+┌─ max-5x ◄── ACTIVE        ← cyan border
 │
 │  Session (5h)
 │  █████████                                           18%
 │  Resets Feb 4 at 5:00 PM
 │
-│  Weekly (all models)
+│  Weekly (all)
 │  ██                                                  4%
 │  Resets Feb 11 at 9:00 AM
 └─
 
 ┌─ max-20x
-│  Session (5h)
-│  ███████████████████████████                         54%
+│  ...
 └─
 
-  Requests: 473
+  Requests: 473  │  Threshold: 70%  │  Recover: 60%
 ```
 
-Colors:
-- 🟢 Green: < 50%
-- 🟡 Yellow: 50-70%  
-- 🔴 Red: > 70%
-- 🔵 Cyan: active account border
+Colors: 🟢 < 50% │ 🟡 50-70% │ 🔴 > 70% │ 🔵 active
 
 ## Configuration
 
-Constants in `src/index.mjs`:
+Configure via CLI (saved to state file):
 
-```javascript
-const THRESHOLD = 0.70;      // Switch to fallback when ANY metric > 70%
-const RECOVER = 0.60;        // Switch back when ALL metrics < 60%
-const CHECK_INTERVAL = 3600000; // Check recovery every 1 hour
+```bash
+bun src/cli.ts config --threshold 0.80   # switch to fallback above 80%
+bun src/cli.ts config --recover 0.70     # switch back below 70%
+bun src/cli.ts config --interval 30      # check recovery every 30 min
+bun src/cli.ts config --reset            # reset to defaults
 ```
+
+Defaults: threshold=70%, recover=60%, interval=60min
 
 ## Data Storage
 
