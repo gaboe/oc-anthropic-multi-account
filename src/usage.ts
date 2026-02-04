@@ -74,43 +74,43 @@ function render(watchMode: boolean) {
 
   for (const account of accounts) {
     const isActive = state.currentAccount === account.name;
+    const c = isActive ? '\x1b[1;36m' : '';
+    const r = isActive ? '\x1b[0m' : '';
+    
     if (isActive) {
-      console.log(`\n\x1b[1;36m┌─ ${account.name} ◄── ACTIVE\x1b[0m`);
+      console.log(`\n${c}┌─ ${account.name} ◄── ACTIVE${r}`);
     } else {
       console.log(`\n┌─ ${account.name}`);
     }
     
     const usage = state.usage?.[account.name];
     if (!usage) {
-      console.log('│  No usage data yet');
-      console.log('└─');
+      console.log(`${c}│${r}  No usage data yet`);
+      console.log(`${c}└─${r}`);
       continue;
     }
     
-    // Session (5h)
     const sessionUtil = usage.session5h?.utilization || 0;
     const sessionPct = Math.round(sessionUtil * 100);
-    console.log('│');
-    console.log(`│  Session (5h)`);
-    console.log(`│  ${colorize(progressBar(sessionUtil), sessionUtil)}  ${colorize(`${sessionPct}%`, sessionUtil)}`);
-    console.log(`│  Resets ${formatResetTime(usage.session5h?.reset)}`);
+    console.log(`${c}│${r}`);
+    console.log(`${c}│${r}  Session (5h)`);
+    console.log(`${c}│${r}  ${colorize(progressBar(sessionUtil), sessionUtil)}  ${colorize(`${sessionPct}%`, sessionUtil)}`);
+    console.log(`${c}│${r}  Resets ${formatResetTime(usage.session5h?.reset)}`);
     
-    // Weekly (all)
     const weeklyUtil = usage.weekly7d?.utilization || 0;
     const weeklyPct = Math.round(weeklyUtil * 100);
-    console.log('│');
-    console.log(`│  Weekly (all models)`);
-    console.log(`│  ${colorize(progressBar(weeklyUtil), weeklyUtil)}  ${colorize(`${weeklyPct}%`, weeklyUtil)}`);
-    console.log(`│  Resets ${formatResetTime(usage.weekly7d?.reset)}`);
+    console.log(`${c}│${r}`);
+    console.log(`${c}│${r}  Weekly (all models)`);
+    console.log(`${c}│${r}  ${colorize(progressBar(weeklyUtil), weeklyUtil)}  ${colorize(`${weeklyPct}%`, weeklyUtil)}`);
+    console.log(`${c}│${r}  Resets ${formatResetTime(usage.weekly7d?.reset)}`);
     
-    // Weekly (Sonnet)
     const sonnetUtil = usage.weekly7dSonnet?.utilization || 0;
     const sonnetPct = Math.round(sonnetUtil * 100);
-    console.log('│');
-    console.log(`│  Weekly (Sonnet)`);
-    console.log(`│  ${colorize(progressBar(sonnetUtil), sonnetUtil)}  ${colorize(`${sonnetPct}%`, sonnetUtil)}`);
-    console.log(`│  Resets ${formatResetTime(usage.weekly7dSonnet?.reset)}`);
-    console.log('└─');
+    console.log(`${c}│${r}`);
+    console.log(`${c}│${r}  Weekly (Sonnet)`);
+    console.log(`${c}│${r}  ${colorize(progressBar(sonnetUtil), sonnetUtil)}  ${colorize(`${sonnetPct}%`, sonnetUtil)}`);
+    console.log(`${c}│${r}  Resets ${formatResetTime(usage.weekly7dSonnet?.reset)}`);
+    console.log(`${c}└─${r}`);
   }
   
   console.log(`\n  Requests: ${state.requestCount || 0}`);
