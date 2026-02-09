@@ -5,27 +5,25 @@ import { join } from "path";
 
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const AUTH_FILE = join(homedir(), ".local/share/opencode/auth.json");
+const MULTI_AUTH_FILE = join(homedir(), ".local/share/opencode/multi-account-auth.json");
 const STATE_FILE = join(homedir(), ".local/share/opencode/multi-account-state.json");
 
-// Read auth.json (tokens only)
-function getRawAuth() {
-  if (!existsSync(AUTH_FILE)) return null;
+// Read multi-account-auth.json (separate file for multi-account tokens)
+function getMultiAuth() {
+  if (!existsSync(MULTI_AUTH_FILE)) return null;
   try {
-    const data = JSON.parse(readFileSync(AUTH_FILE, "utf-8"));
-    return data.anthropic;
+    return JSON.parse(readFileSync(MULTI_AUTH_FILE, "utf-8"));
   } catch {
     return null;
   }
 }
 
-// Save auth.json (tokens only)
-function saveRawAuth(anthropicAuth) {
+// Save multi-account-auth.json
+function saveMultiAuth(multiAuth) {
   try {
-    const data = JSON.parse(readFileSync(AUTH_FILE, "utf-8"));
-    data.anthropic = anthropicAuth;
-    writeFileSync(AUTH_FILE, JSON.stringify(data, null, 2));
+    writeFileSync(MULTI_AUTH_FILE, JSON.stringify(multiAuth, null, 2));
   } catch (e) {
-    console.error("[anthropic-multi-account] Failed to save auth:", e);
+    console.error("[anthropic-multi-account] Failed to save multi-auth:", e);
   }
 }
 
@@ -200,14 +198,45 @@ function selectThresholdAccount(accounts, state) {
     return primary;
   } else {
     // On fallback - check if should return to primary
-    const timeSinceCheck = Date.now() - (state.lastPrimaryCheck || 0);
-    if (timeSinceCheck > CHECK_INTERVAL) {
+    const now = Date.now();
+    const lastCheck = state.lastPrimaryCheck || 0;
+    
+    // Get earliest reset time from primary account (when any limit resets)
+    function getEarliestResetTime(usage) {
+      if (!usage) return null;
+      const resets = [
+        usage.session5h?.reset,
+        usage.weekly7d?.reset,
+        usage.weekly7dSonnet?.reset
+      ].filter(r => r != null);
+      if (resets.length === 0) return null;
+      return Math.min(...resets) * 1000; // convert seconds to ms
+    }
+    
+    const earliestReset = getEarliestResetTime(primaryUsage);
+    
+    // Check if reset time has passed since we switched away
+    // OR fallback to hourly interval if no reset time available
+    const resetPassed = earliestReset && earliestReset <= now && earliestReset > lastCheck;
+    const intervalPassed = (now - lastCheck) > CHECK_INTERVAL;
+    
+    if (resetPassed) {
+      // Reset time passed - primary should have fresh capacity
+      console.log(`[multi-account] → ${primary.name}: reset time passed, switching back`);
+      return primary;
+    }
+    
+    if (intervalPassed) {
+      // Fallback: hourly check if no reset time info
       const maxUtil = getMaxUtilization(primaryUsage);
       if (maxUtil < RECOVER) {
-        console.log(`[multi-account] → ${primary.name}: all metrics below 60%`);
+        console.log(`[multi-account] → ${primary.name}: all metrics below ${RECOVER * 100}%`);
         return primary;
       }
+      // Update lastPrimaryCheck so we don't spam check
+      state.lastPrimaryCheck = now;
     }
+    
     // Stay on current fallback
     return accounts.find(a => a.name === state.currentAccount) || fallbacks[0];
   }
@@ -235,9 +264,9 @@ export async function AnthropicAuthPlugin({ client }) {
         // Bug fix: handle undefined auth
         if (!auth) return {};
 
-        // Check for multi-account mode by reading raw auth.json
-        const rawAuth = getRawAuth();
-        const hasMultiAccounts = rawAuth?.multiAccounts?.accounts?.length > 0;
+        // Check for multi-account mode by reading separate multi-account-auth.json
+        const multiAuth = getMultiAuth();
+        const hasMultiAccounts = multiAuth?.accounts?.length > 0;
 
         // Handle multi-account auth
         if (auth.type === "oauth" && hasMultiAccounts) {
@@ -260,13 +289,13 @@ export async function AnthropicAuthPlugin({ client }) {
              * @param {any} init
              */
             async fetch(input, init) {
-              // Read accounts from auth.json, state from state.json
-              const rawAuth = getRawAuth();
-              if (!rawAuth?.multiAccounts?.accounts?.length) {
+              // Read accounts from multi-account-auth.json, state from state.json
+              const multiAuth = getMultiAuth();
+              if (!multiAuth?.accounts?.length) {
                 return fetch(input, init);
               }
 
-              const accounts = rawAuth.multiAccounts.accounts;
+              const accounts = multiAuth.accounts;
               const state = getState();
 
                // Select account via threshold-based switching
@@ -307,8 +336,8 @@ export async function AnthropicAuthPlugin({ client }) {
                 account.refresh = json.refresh_token;
                 account.expires = Date.now() + json.expires_in * 1000;
 
-                // Save updated tokens to auth.json
-                saveRawAuth(rawAuth);
+                // Save updated tokens to multi-account-auth.json
+                saveMultiAuth(multiAuth);
               }
 
               // Increment request counter
@@ -451,23 +480,29 @@ export async function AnthropicAuthPlugin({ client }) {
               });
 
               // Capture usage from response headers and save to state
+              // Only update metrics when headers are actually present to avoid
+              // overwriting valid data with zeros (e.g. Sonnet headers only appear on Sonnet requests)
               state.usage = state.usage || {};
+              const prev = state.usage[account.name] || {};
+
+              function updateMetric(prev, prefix) {
+                const rawUtil = response.headers.get(`${prefix}-utilization`);
+                const rawReset = response.headers.get(`${prefix}-reset`);
+                const rawStatus = response.headers.get(`${prefix}-status`);
+                if (rawUtil === null && rawReset === null && rawStatus === null) {
+                  return prev; // no headers present, keep previous data
+                }
+                return {
+                  utilization: rawUtil !== null ? (parseFloat(rawUtil) || 0) : (prev?.utilization ?? 0),
+                  reset: rawReset !== null ? (parseInt(rawReset) || null) : (prev?.reset ?? null),
+                  status: rawStatus !== null ? rawStatus : (prev?.status ?? 'unknown')
+                };
+              }
+
               state.usage[account.name] = {
-                session5h: {
-                  utilization: parseFloat(response.headers.get('anthropic-ratelimit-unified-5h-utilization')) || 0,
-                  reset: parseInt(response.headers.get('anthropic-ratelimit-unified-5h-reset')) || null,
-                  status: response.headers.get('anthropic-ratelimit-unified-5h-status') || 'unknown'
-                },
-                weekly7d: {
-                  utilization: parseFloat(response.headers.get('anthropic-ratelimit-unified-7d-utilization')) || 0,
-                  reset: parseInt(response.headers.get('anthropic-ratelimit-unified-7d-reset')) || null,
-                  status: response.headers.get('anthropic-ratelimit-unified-7d-status') || 'unknown'
-                },
-                weekly7dSonnet: {
-                  utilization: parseFloat(response.headers.get('anthropic-ratelimit-unified-7d_sonnet-utilization')) || 0,
-                  reset: parseInt(response.headers.get('anthropic-ratelimit-unified-7d_sonnet-reset')) || null,
-                  status: response.headers.get('anthropic-ratelimit-unified-7d_sonnet-status') || 'unknown'
-                },
+                session5h: updateMetric(prev.session5h, 'anthropic-ratelimit-unified-5h'),
+                weekly7d: updateMetric(prev.weekly7d, 'anthropic-ratelimit-unified-7d'),
+                weekly7dSonnet: updateMetric(prev.weekly7dSonnet, 'anthropic-ratelimit-unified-7d_sonnet'),
                 timestamp: new Date().toISOString()
               };
 
