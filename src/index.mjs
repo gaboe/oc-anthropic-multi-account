@@ -495,11 +495,17 @@ export async function AnthropicAuthPlugin({ client }) {
                 const rawReset = response.headers.get(`${prefix}-reset`);
                 const rawStatus = response.headers.get(`${prefix}-status`);
                 if (rawUtil === null && rawReset === null && rawStatus === null) {
-                  return prev; // no headers present, keep previous data
+                  return prev;
+                }
+                const newReset = rawReset !== null ? (parseInt(rawReset) || null) : null;
+                // Genuine reading has a valid reset timestamp.
+                // Headers with util=0 and no reset = non-applicable metric (e.g. Sonnet header on non-Sonnet request).
+                if (!newReset && prev?.reset) {
+                  return prev;
                 }
                 return {
                   utilization: rawUtil !== null ? (parseFloat(rawUtil) || 0) : (prev?.utilization ?? 0),
-                  reset: rawReset !== null ? (parseInt(rawReset) || null) : (prev?.reset ?? null),
+                  reset: newReset || (prev?.reset ?? null),
                   status: rawStatus !== null ? rawStatus : (prev?.status ?? 'unknown')
                 };
               }

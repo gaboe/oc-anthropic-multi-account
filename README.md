@@ -39,11 +39,13 @@ Anthropic Max subscriptions have rate limits. This plugin automatically switches
 
 ### Threshold Logic
 
+Each metric (session, weekly, sonnet) can have its own threshold.
+
 | Condition | Action |
 |-----------|--------|
-| Primary > **70%** | Switch to first fallback < 70% |
-| Primary < **60%** | Switch back to primary |
-| On fallback | Check recovery every **1 hour** |
+| Any primary metric > its **threshold** | Switch to first fallback under thresholds |
+| All primary metrics < their **thresholds** | Switch back to primary |
+| On fallback | Check recovery every **1 hour** or on rate limit window reset |
 
 ### Metrics Tracked
 
@@ -99,22 +101,18 @@ The CLI will guide you through OAuth authentication for each account.
 <details>
 <summary>Manual configuration (advanced)</summary>
 
-Tokens are stored in `~/.local/share/opencode/auth.json`:
+Tokens are stored in `~/.local/share/opencode/multi-account-auth.json`:
 
 ```json
 {
-  "anthropic": {
-    "multiAccounts": {
-      "accounts": [
-        {
-          "name": "primary",
-          "access": "your-access-token",
-          "refresh": "your-refresh-token",
-          "expires": 1234567890000
-        }
-      ]
+  "accounts": [
+    {
+      "name": "primary",
+      "access": "your-access-token",
+      "refresh": "your-refresh-token",
+      "expires": 1234567890000
     }
-  }
+  ]
 }
 ```
 
@@ -135,9 +133,10 @@ All commands via unified CLI:
 bun src/cli.ts usage              # show usage
 bun src/cli.ts usage --watch      # live updates (5s)
 bun src/cli.ts config             # show config
-bun src/cli.ts config --threshold 0.80 --recover 0.70
-bun src/cli.ts config --interval 30   # recovery check interval (minutes)
-bun src/cli.ts add <account-name>     # add account via OAuth
+bun src/cli.ts config --thresholds 95,80,90   # session, weekly, sonnet
+bun src/cli.ts config --threshold 0.80        # same value for all metrics
+bun src/cli.ts config --interval 30           # recovery check interval (minutes)
+bun src/cli.ts add <account-name>             # add account via OAuth
 ```
 
 Example output:
@@ -147,22 +146,26 @@ Example output:
 ║              anthropic-multi-account                             ║
 ╚══════════════════════════════════════════════════════════════════╝
 
-┌─ max-5x ◄── ACTIVE        ← cyan border
+┌─ max-5x ◄── ACTIVE
 │
-│  Session (5h)
+│  Session (5h)  (threshold 95%)
 │  █████████                                           18%
 │  Resets Feb 4 at 5:00 PM
 │
-│  Weekly (all)
+│  Weekly (all)  (threshold 80%)
 │  ██                                                  4%
 │  Resets Feb 11 at 9:00 AM
+│
+│  Weekly (Sonnet)  (threshold 90%)
+│  █                                                   2%
+│  Resets Feb 16 at 8:00 AM
 └─
 
 ┌─ max-20x
 │  ...
 └─
 
-  Requests: 473  │  Threshold: 70%  │  Recover: 60%
+  Requests: 473
 ```
 
 Colors: 🟢 < 50% │ 🟡 50-70% │ 🔴 > 70% │ 🔵 active
@@ -172,19 +175,24 @@ Colors: 🟢 < 50% │ 🟡 50-70% │ 🔴 > 70% │ 🔵 active
 Configure via CLI (saved to state file):
 
 ```bash
-bun src/cli.ts config --threshold 0.80   # switch to fallback above 80%
-bun src/cli.ts config --recover 0.70     # switch back below 70%
-bun src/cli.ts config --interval 30      # check recovery every 30 min
-bun src/cli.ts config --reset            # reset to defaults
+bun src/cli.ts config --thresholds 95,80,90   # set session, weekly, sonnet thresholds
+bun src/cli.ts config --threshold 0.80         # same threshold for all metrics
+bun src/cli.ts config --threshold-session 0.95  # set individual metric
+bun src/cli.ts config --threshold-weekly 0.80
+bun src/cli.ts config --threshold-sonnet 0.90
+bun src/cli.ts config --interval 30             # check recovery every 30 min
+bun src/cli.ts config --reset                   # reset to defaults
 ```
 
-Defaults: threshold=70%, recover=60%, interval=60min
+Defaults: threshold=70%, interval=60min
+
+Changing config auto-evaluates whether the active account should switch.
 
 ## Data Storage
 
 Data is split into two files to prevent corruption from frequent writes:
 
-**`~/.local/share/opencode/auth.json`** - Tokens (changes rarely)
+**`~/.local/share/opencode/multi-account-auth.json`** - Tokens (changes rarely)
 - `accounts` - Array of accounts with access/refresh tokens
 
 **`~/.local/share/opencode/multi-account-state.json`** - Runtime state (changes frequently)

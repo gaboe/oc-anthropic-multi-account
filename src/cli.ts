@@ -193,6 +193,18 @@ function cmdConfig(args: string[]) {
   const t = parseArg('--threshold');
   if (t) { state.config.threshold = parseFloat(t); changed = true; }
   
+  // --thresholds 95,80,90 → session=95%, weekly=80%, sonnet=90%
+  const ta = parseArg('--thresholds');
+  if (ta) {
+    const parts = ta.split(',').map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) {
+      console.error('Usage: --thresholds <session>,<weekly>,<sonnet>  (e.g. --thresholds 95,80,90)');
+      return;
+    }
+    state.config.threshold = { session5h: parts[0] / 100, weekly7d: parts[1] / 100, weekly7dSonnet: parts[2] / 100 };
+    changed = true;
+  }
+  
   const ts = parseArg('--threshold-session');
   if (ts) { ensureThresholdObject(); state.config.threshold.session5h = parseFloat(ts); changed = true; }
   
@@ -400,6 +412,7 @@ Commands:
   usage [--watch]                     Show usage across all accounts
   config [--show]                     Show current config
   config --threshold <0-1>            Set threshold for all metrics (default: 0.70)
+  config --thresholds <s>,<w>,<so>   Set all thresholds at once (e.g. 95,80,90)
   config --threshold-session <0-1>    Set threshold for session (5h)
   config --threshold-weekly <0-1>     Set threshold for weekly (7d)
   config --threshold-sonnet <0-1>     Set threshold for weekly Sonnet (7d)
@@ -410,8 +423,8 @@ Commands:
 
 Examples:
   bun src/cli.ts usage --watch
+  bun src/cli.ts config --thresholds 95,80,90
   bun src/cli.ts config --threshold 0.95
-  bun src/cli.ts config --threshold-session 0.95 --threshold-weekly 0.80
   bun src/cli.ts add max-5x
   bun src/cli.ts add max-20x "https://...?state=xyz" "code#state"
 `);
