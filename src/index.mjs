@@ -154,7 +154,6 @@ function normalizeThresholds(value, fallback) {
 function selectThresholdAccount(accounts, state) {
   const config = state?.config || {};
   const thresholds = normalizeThresholds(config.threshold, 0.70);
-  const recovers = normalizeThresholds(config.recover, 0.60);
   const CHECK_INTERVAL = config.checkInterval ?? 3600000;
 
   if (!accounts || accounts.length === 0) return null;
@@ -167,7 +166,6 @@ function selectThresholdAccount(accounts, state) {
     return primary;
   }
 
-  // Returns true if ANY metric exceeds its per-metric threshold
   function isOverThreshold(usage) {
     if (!usage) return false;
     return (
@@ -177,17 +175,6 @@ function selectThresholdAccount(accounts, state) {
     );
   }
 
-  // Returns true if ALL metrics are under their per-metric recover threshold
-  function isUnderRecover(usage) {
-    if (!usage) return true;
-    return (
-      (usage.session5h?.utilization || 0) < recovers.session5h &&
-      (usage.weekly7d?.utilization || 0) < recovers.weekly7d &&
-      (usage.weekly7dSonnet?.utilization || 0) < recovers.weekly7dSonnet
-    );
-  }
-
-  // Get the metric with highest ratio to its threshold (most "over limit")
   function getExceededMetric(usage) {
     if (!usage) return { name: 'unknown', value: 0, threshold: 1 };
     const metrics = [
@@ -198,7 +185,6 @@ function selectThresholdAccount(accounts, state) {
     return metrics.reduce((max, m) => (m.value / m.threshold) > (max.value / max.threshold) ? m : max);
   }
 
-  // Aggregate utilization score relative to thresholds (for comparing fallbacks)
   function getUtilizationScore(usage) {
     if (!usage) return 0;
     return Math.max(
@@ -213,7 +199,6 @@ function selectThresholdAccount(accounts, state) {
 
   if (currentIsPrimary) {
     if (isOverThreshold(primaryUsage)) {
-      // Find first fallback under threshold
       for (const fallback of fallbacks) {
         const fallbackUsage = state.usage?.[fallback.name];
         if (!isOverThreshold(fallbackUsage)) {
@@ -222,7 +207,6 @@ function selectThresholdAccount(accounts, state) {
           return fallback;
         }
       }
-      // All fallbacks also over threshold - use the one with lowest score
       const best = fallbacks.reduce((lowest, f) => {
         return getUtilizationScore(state.usage?.[f.name]) < getUtilizationScore(state.usage?.[lowest.name]) ? f : lowest;
       }, fallbacks[0]);
@@ -232,11 +216,9 @@ function selectThresholdAccount(accounts, state) {
     }
     return primary;
   } else {
-    // On fallback - check if should return to primary
     const now = Date.now();
     const lastCheck = state.lastPrimaryCheck || 0;
     
-    // Get earliest reset time from primary account (when any limit resets)
     function getEarliestResetTime(usage) {
       if (!usage) return null;
       const resets = [
@@ -245,7 +227,7 @@ function selectThresholdAccount(accounts, state) {
         usage.weekly7dSonnet?.reset
       ].filter(r => r != null);
       if (resets.length === 0) return null;
-      return Math.min(...resets) * 1000; // convert seconds to ms
+      return Math.min(...resets) * 1000;
     }
     
     const earliestReset = getEarliestResetTime(primaryUsage);
@@ -255,14 +237,12 @@ function selectThresholdAccount(accounts, state) {
     if (resetPassed || intervalPassed) {
       state.lastPrimaryCheck = now;
       
-      // Only switch back if ALL primary metrics are under their recover thresholds
-      if (isUnderRecover(primaryUsage)) {
-        console.log(`[multi-account] → ${primary.name}: all metrics under recover thresholds`);
+      if (!isOverThreshold(primaryUsage)) {
+        console.log(`[multi-account] → ${primary.name}: under threshold, switching back`);
         return primary;
       }
     }
     
-    // Stay on current fallback
     return accounts.find(a => a.name === state.currentAccount) || fallbacks[0];
   }
 }

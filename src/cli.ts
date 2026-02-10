@@ -10,7 +10,7 @@ const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const MULTI_AUTH_FILE = join(homedir(), ".local/share/opencode/multi-account-auth.json");
 const STATE_FILE = join(homedir(), ".local/share/opencode/multi-account-state.json");
 
-const DEFAULTS = { threshold: 0.70, recover: 0.60, checkInterval: 3600000 };
+const DEFAULTS = { threshold: 0.70, checkInterval: 3600000 };
 
 type PerMetric = { session5h: number; weekly7d: number; weekly7dSonnet: number };
 
@@ -28,11 +28,6 @@ function normalizeThresholds(value: any, fallback: number): PerMetric {
 
 function allSame(pm: PerMetric): boolean {
   return pm.session5h === pm.weekly7d && pm.weekly7d === pm.weekly7dSonnet;
-}
-
-function formatPerMetric(pm: PerMetric): string {
-  if (allSame(pm)) return `${Math.round(pm.session5h * 100)}%`;
-  return `${Math.round(pm.session5h * 100)}/${Math.round(pm.weekly7d * 100)}/${Math.round(pm.weekly7dSonnet * 100)}%`;
 }
 
 // ============================================================================
@@ -130,8 +125,11 @@ function renderUsage(watch: boolean) {
   }
   
   const t = normalizeThresholds(config.threshold, DEFAULTS.threshold);
-  const r = normalizeThresholds(config.recover, DEFAULTS.recover);
-  console.log(`\n  Requests: ${state.requestCount || 0}  │  Threshold: ${formatPerMetric(t)}  │  Recover: ${formatPerMetric(r)}`);
+  if (allSame(t)) {
+    console.log(`\n  Requests: ${state.requestCount || 0}  │  Threshold: ${Math.round(t.session5h * 100)}%`);
+  } else {
+    console.log(`\n  Requests: ${state.requestCount || 0}  │  Threshold  S: ${Math.round(t.session5h * 100)}%  W: ${Math.round(t.weekly7d * 100)}%  So: ${Math.round(t.weekly7dSonnet * 100)}%`);
+  }
   
   if (watch) {
     console.log(`  Updated: ${new Date().toLocaleTimeString()}  │  Ctrl+C to exit`);
@@ -154,7 +152,6 @@ function cmdConfig(args: string[]) {
   if (args.includes('--show') || args.length === 0) {
     const cfg = state.config || {};
     const t = normalizeThresholds(cfg.threshold, DEFAULTS.threshold);
-    const r = normalizeThresholds(cfg.recover, DEFAULTS.recover);
     
     console.log('\n  Current config:');
     if (allSame(t)) {
@@ -164,14 +161,6 @@ function cmdConfig(args: string[]) {
       console.log(`      Session (5h):    ${Math.round(t.session5h * 100)}%`);
       console.log(`      Weekly (all):    ${Math.round(t.weekly7d * 100)}%`);
       console.log(`      Weekly (Sonnet): ${Math.round(t.weekly7dSonnet * 100)}%`);
-    }
-    if (allSame(r)) {
-      console.log(`    Recover:        ${Math.round(r.session5h * 100)}%`);
-    } else {
-      console.log(`    Recover:`);
-      console.log(`      Session (5h):    ${Math.round(r.session5h * 100)}%`);
-      console.log(`      Weekly (all):    ${Math.round(r.weekly7d * 100)}%`);
-      console.log(`      Weekly (Sonnet): ${Math.round(r.weekly7dSonnet * 100)}%`);
     }
     console.log(`    Check interval: ${(cfg.checkInterval ?? DEFAULTS.checkInterval) / 60000} min\n`);
     return;
@@ -192,48 +181,34 @@ function cmdConfig(args: string[]) {
     return idx !== -1 ? args[idx + 1] : null;
   };
   
-  // Convert config.threshold/recover to object if setting per-metric value
-  function ensureObject(key: string, fallback: number) {
-    const current = state.config[key];
+  function ensureThresholdObject() {
+    const current = state.config.threshold;
     if (typeof current === 'number') {
-      state.config[key] = { session5h: current, weekly7d: current, weekly7dSonnet: current };
+      state.config.threshold = { session5h: current, weekly7d: current, weekly7dSonnet: current };
     } else if (!current || typeof current !== 'object') {
-      state.config[key] = { session5h: fallback, weekly7d: fallback, weekly7dSonnet: fallback };
+      state.config.threshold = { session5h: DEFAULTS.threshold, weekly7d: DEFAULTS.threshold, weekly7dSonnet: DEFAULTS.threshold };
     }
   }
   
-  // Global threshold/recover (single number for all metrics)
   const t = parseArg('--threshold');
   if (t) { state.config.threshold = parseFloat(t); changed = true; }
   
-  const r = parseArg('--recover');
-  if (r) { state.config.recover = parseFloat(r); changed = true; }
-  
-  // Per-metric threshold flags
   const ts = parseArg('--threshold-session');
-  if (ts) { ensureObject('threshold', DEFAULTS.threshold); state.config.threshold.session5h = parseFloat(ts); changed = true; }
+  if (ts) { ensureThresholdObject(); state.config.threshold.session5h = parseFloat(ts); changed = true; }
   
   const tw = parseArg('--threshold-weekly');
-  if (tw) { ensureObject('threshold', DEFAULTS.threshold); state.config.threshold.weekly7d = parseFloat(tw); changed = true; }
+  if (tw) { ensureThresholdObject(); state.config.threshold.weekly7d = parseFloat(tw); changed = true; }
   
   const tso = parseArg('--threshold-sonnet');
-  if (tso) { ensureObject('threshold', DEFAULTS.threshold); state.config.threshold.weekly7dSonnet = parseFloat(tso); changed = true; }
-  
-  // Per-metric recover flags
-  const rs = parseArg('--recover-session');
-  if (rs) { ensureObject('recover', DEFAULTS.recover); state.config.recover.session5h = parseFloat(rs); changed = true; }
-  
-  const rw = parseArg('--recover-weekly');
-  if (rw) { ensureObject('recover', DEFAULTS.recover); state.config.recover.weekly7d = parseFloat(rw); changed = true; }
-  
-  const rso = parseArg('--recover-sonnet');
-  if (rso) { ensureObject('recover', DEFAULTS.recover); state.config.recover.weekly7dSonnet = parseFloat(rso); changed = true; }
+  if (tso) { ensureThresholdObject(); state.config.threshold.weekly7dSonnet = parseFloat(tso); changed = true; }
   
   const i = parseArg('--interval');
   if (i) { state.config.checkInterval = parseInt(i) * 60000; changed = true; }
   
+  // Clean up legacy recover config
+  delete state.config.recover;
+  
   if (changed) {
-    // Auto-evaluate: check if account should switch with new config
     autoEvaluate(state);
     saveState(state);
     console.log('✓ Config saved');
@@ -241,17 +216,12 @@ function cmdConfig(args: string[]) {
   }
 }
 
-/**
- * Auto-evaluate account selection after config change.
- * Checks current usage against new thresholds and switches if needed.
- */
 function autoEvaluate(state: any) {
   const accounts = loadAccounts();
   if (accounts.length < 2 || !state.currentAccount) return;
   
   const config = state.config || {};
   const t = normalizeThresholds(config.threshold, DEFAULTS.threshold);
-  const r = normalizeThresholds(config.recover, DEFAULTS.recover);
   
   function isOverThreshold(usage: any): boolean {
     if (!usage) return false;
@@ -262,21 +232,11 @@ function autoEvaluate(state: any) {
     );
   }
   
-  function isUnderRecover(usage: any): boolean {
-    if (!usage) return true;
-    return (
-      (usage.session5h?.utilization || 0) < r.session5h &&
-      (usage.weekly7d?.utilization || 0) < r.weekly7d &&
-      (usage.weekly7dSonnet?.utilization || 0) < r.weekly7dSonnet
-    );
-  }
-  
   const primary = accounts[0];
   const currentAccount = state.currentAccount;
   const primaryUsage = state.usage?.[primary.name];
   
   if (currentAccount === primary.name) {
-    // On primary - should we switch to fallback?
     if (isOverThreshold(primaryUsage)) {
       for (const fallback of accounts.slice(1)) {
         if (!isOverThreshold(state.usage?.[fallback.name])) {
@@ -287,10 +247,9 @@ function autoEvaluate(state: any) {
       }
     }
   } else {
-    // On fallback - should we switch back to primary?
-    if (isUnderRecover(primaryUsage)) {
+    if (!isOverThreshold(primaryUsage)) {
       state.currentAccount = primary.name;
-      console.log(`  ⚡ Auto-switch: ${currentAccount} → ${primary.name} (under new recover thresholds)`);
+      console.log(`  ⚡ Auto-switch: ${currentAccount} → ${primary.name} (under new thresholds)`);
     }
   }
 }
@@ -444,10 +403,6 @@ Commands:
   config --threshold-session <0-1>    Set threshold for session (5h)
   config --threshold-weekly <0-1>     Set threshold for weekly (7d)
   config --threshold-sonnet <0-1>     Set threshold for weekly Sonnet (7d)
-  config --recover <0-1>              Set recover for all metrics (default: 0.60)
-  config --recover-session <0-1>      Set recover for session (5h)
-  config --recover-weekly <0-1>       Set recover for weekly (7d)
-  config --recover-sonnet <0-1>       Set recover for weekly Sonnet (7d)
   config --interval <minutes>         Set recovery check interval (default: 60)
   config --reset                      Reset config to defaults
   add <name>                          Add account (interactive OAuth)
@@ -455,7 +410,7 @@ Commands:
 
 Examples:
   bun src/cli.ts usage --watch
-  bun src/cli.ts config --threshold 0.80 --recover 0.70
+  bun src/cli.ts config --threshold 0.95
   bun src/cli.ts config --threshold-session 0.95 --threshold-weekly 0.80
   bun src/cli.ts add max-5x
   bun src/cli.ts add max-20x "https://...?state=xyz" "code#state"
