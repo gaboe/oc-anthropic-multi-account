@@ -498,9 +498,7 @@ export async function AnthropicAuthPlugin({ client }) {
                   return prev;
                 }
                 const newReset = rawReset !== null ? (parseInt(rawReset) || null) : null;
-                // Genuine reading has a valid reset timestamp.
-                // Headers with util=0 and no reset = non-applicable metric (e.g. Sonnet header on non-Sonnet request).
-                if (!newReset && prev?.reset) {
+                if (!newReset && prev) {
                   return prev;
                 }
                 return {
