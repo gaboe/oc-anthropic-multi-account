@@ -129,12 +129,7 @@ function renderUsage(watch: boolean) {
     console.log(`${c}└─${r}`);
   }
   
-  const t = normalizeThresholds(config.threshold, DEFAULTS.threshold);
-  if (allSame(t)) {
-    console.log(`\n  Requests: ${state.requestCount || 0}  │  Threshold: ${Math.round(t.session5h * 100)}%`);
-  } else {
-    console.log(`\n  Requests: ${state.requestCount || 0}  │  Threshold  S: ${Math.round(t.session5h * 100)}%  W: ${Math.round(t.weekly7d * 100)}%  So: ${Math.round(t.weekly7dSonnet * 100)}%`);
-  }
+  console.log(`\n  Requests: ${state.requestCount || 0}`);
   
   if (watch) {
     console.log(`  Updated: ${new Date().toLocaleTimeString()}  │  Ctrl+C to exit`);
