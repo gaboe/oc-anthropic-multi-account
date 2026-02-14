@@ -101,6 +101,26 @@ function formatResetTime(ts: number | null): string {
   }).format(new Date(ts * 1000));
 }
 
+const EMPTY_USAGE = {
+  session5h: { utilization: 0, reset: null, status: 'allowed' },
+  weekly7d: { utilization: 0, reset: null, status: 'allowed' },
+  weekly7dSonnet: { utilization: 0, reset: null, status: 'allowed' },
+  timestamp: null
+};
+
+function ensureAllAccountsInState(accounts: any[], state: any): boolean {
+  if (!accounts?.length) return false;
+  state.usage = state.usage || {};
+  let changed = false;
+  for (const account of accounts) {
+    if (!state.usage[account.name]) {
+      state.usage[account.name] = structuredClone(EMPTY_USAGE);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function resolveStaleMetrics(state: any): boolean {
   const usage = state.usage;
   if (!usage) return false;
@@ -130,7 +150,9 @@ function renderUsage(watch: boolean) {
   const state = loadState();
   const config = state.config || {};
   
-  if (resolveStaleMetrics(state)) {
+  const accountsChanged = ensureAllAccountsInState(accounts, state);
+  const staleResolved = resolveStaleMetrics(state);
+  if (accountsChanged || staleResolved) {
     autoEvaluate(state);
     saveState(state);
   }

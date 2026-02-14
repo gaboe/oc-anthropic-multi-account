@@ -159,6 +159,26 @@ function normalizeThresholds(value, fallback) {
   return { session5h: fallback, weekly7d: fallback, weekly7dSonnet: fallback };
 }
 
+const EMPTY_USAGE = {
+  session5h: { utilization: 0, reset: null, status: 'allowed' },
+  weekly7d: { utilization: 0, reset: null, status: 'allowed' },
+  weekly7dSonnet: { utilization: 0, reset: null, status: 'allowed' },
+  timestamp: null
+};
+
+function ensureAllAccountsInState(accounts, state) {
+  if (!accounts?.length) return false;
+  state.usage = state.usage || {};
+  let changed = false;
+  for (const account of accounts) {
+    if (!state.usage[account.name]) {
+      state.usage[account.name] = structuredClone(EMPTY_USAGE);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function resolveStaleMetrics(state) {
   const usage = state.usage;
   if (!usage) return false;
@@ -329,6 +349,7 @@ export async function AnthropicAuthPlugin({ client }) {
               const accounts = multiAuth.accounts;
               const state = getState();
 
+               ensureAllAccountsInState(accounts, state);
                resolveStaleMetrics(state);
 
                const account = selectThresholdAccount(accounts, state);
