@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { generatePKCE } from "@openauthjs/openauth/pkce";
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, copyFileSync, renameSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import * as readline from "readline";
@@ -31,33 +31,56 @@ function allSame(pm: PerMetric): boolean {
 }
 
 // ============================================================================
-// File helpers
+// File helpers (atomic write + backup fallback)
 // ============================================================================
 
-function loadAccounts() {
+function safeReadJSON<T>(filePath: string, fallback: T): T {
+  for (const path of [filePath, filePath + '.bak']) {
+    if (!existsSync(path)) continue;
+    try {
+      const data = JSON.parse(readFileSync(path, "utf-8"));
+      if (path.endsWith('.bak')) {
+        console.log(`[multi-account] Recovered ${filePath} from backup`);
+      }
+      return data;
+    } catch {
+      continue;
+    }
+  }
+  return fallback;
+}
+
+function safeWriteJSON(filePath: string, data: any) {
   try {
-    return JSON.parse(readFileSync(MULTI_AUTH_FILE, "utf-8")).accounts || [];
-  } catch { return []; }
+    if (existsSync(filePath)) {
+      copyFileSync(filePath, filePath + '.bak');
+    }
+    const tmp = filePath + '.tmp';
+    writeFileSync(tmp, JSON.stringify(data, null, 2));
+    renameSync(tmp, filePath);
+  } catch (e) {
+    console.error(`[multi-account] Failed to save ${filePath}:`, e);
+  }
+}
+
+function loadAccounts() {
+  return safeReadJSON(MULTI_AUTH_FILE, { accounts: [] } as any).accounts || [];
 }
 
 function loadMultiAuth() {
-  if (!existsSync(MULTI_AUTH_FILE)) return { accounts: [] };
-  try { return JSON.parse(readFileSync(MULTI_AUTH_FILE, "utf-8")); }
-  catch { return { accounts: [] }; }
+  return safeReadJSON(MULTI_AUTH_FILE, { accounts: [] });
 }
 
 function saveMultiAuth(data: any) {
-  writeFileSync(MULTI_AUTH_FILE, JSON.stringify(data, null, 2));
+  safeWriteJSON(MULTI_AUTH_FILE, data);
 }
 
 function loadState() {
-  if (!existsSync(STATE_FILE)) return {};
-  try { return JSON.parse(readFileSync(STATE_FILE, "utf-8")); }
-  catch { return {}; }
+  return safeReadJSON(STATE_FILE, {});
 }
 
 function saveState(state: any) {
-  writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+  safeWriteJSON(STATE_FILE, state);
 }
 
 // ============================================================================
@@ -78,6 +101,24 @@ function formatResetTime(ts: number | null): string {
   }).format(new Date(ts * 1000));
 }
 
+function resolveStaleMetrics(state: any): boolean {
+  const usage = state.usage;
+  if (!usage) return false;
+  const now = Date.now();
+  let changed = false;
+  for (const accountName of Object.keys(usage)) {
+    for (const key of ['session5h', 'weekly7d', 'weekly7dSonnet'] as const) {
+      const metric = usage[accountName]?.[key];
+      if (metric?.reset && metric.reset * 1000 < now && metric.utilization > 0) {
+        metric.utilization = 0;
+        metric.status = 'allowed';
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
 function colorize(text: string, util: number): string {
   if (util >= 0.7) return `\x1b[31m${text}\x1b[0m`;
   if (util >= 0.5) return `\x1b[33m${text}\x1b[0m`;
@@ -88,6 +129,11 @@ function renderUsage(watch: boolean) {
   const accounts = loadAccounts();
   const state = loadState();
   const config = state.config || {};
+  
+  if (resolveStaleMetrics(state)) {
+    autoEvaluate(state);
+    saveState(state);
+  }
   
   if (watch) process.stdout.write('\x1b[2J\x1b[H');
   

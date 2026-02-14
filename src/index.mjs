@@ -1,5 +1,5 @@
 import { generatePKCE } from "@openauthjs/openauth/pkce";
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, copyFileSync, renameSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
@@ -8,42 +8,55 @@ const AUTH_FILE = join(homedir(), ".local/share/opencode/auth.json");
 const MULTI_AUTH_FILE = join(homedir(), ".local/share/opencode/multi-account-auth.json");
 const STATE_FILE = join(homedir(), ".local/share/opencode/multi-account-state.json");
 
+// Safe JSON read with .bak fallback
+function safeReadJSON(filePath, fallback) {
+  for (const path of [filePath, filePath + '.bak']) {
+    if (!existsSync(path)) continue;
+    try {
+      const data = JSON.parse(readFileSync(path, "utf-8"));
+      if (path.endsWith('.bak')) {
+        console.log(`[multi-account] Recovered ${filePath} from backup`);
+      }
+      return data;
+    } catch {
+      continue;
+    }
+  }
+  return fallback;
+}
+
+// Atomic write: backup current → write to .tmp → rename to target
+function safeWriteJSON(filePath, data) {
+  try {
+    if (existsSync(filePath)) {
+      copyFileSync(filePath, filePath + '.bak');
+    }
+    const tmp = filePath + '.tmp';
+    writeFileSync(tmp, JSON.stringify(data, null, 2));
+    renameSync(tmp, filePath);
+  } catch (e) {
+    console.error(`[multi-account] Failed to save ${filePath}:`, e);
+  }
+}
+
 // Read multi-account-auth.json (separate file for multi-account tokens)
 function getMultiAuth() {
-  if (!existsSync(MULTI_AUTH_FILE)) return null;
-  try {
-    return JSON.parse(readFileSync(MULTI_AUTH_FILE, "utf-8"));
-  } catch {
-    return null;
-  }
+  return safeReadJSON(MULTI_AUTH_FILE, null);
 }
 
 // Save multi-account-auth.json
 function saveMultiAuth(multiAuth) {
-  try {
-    writeFileSync(MULTI_AUTH_FILE, JSON.stringify(multiAuth, null, 2));
-  } catch (e) {
-    console.error("[anthropic-multi-account] Failed to save multi-auth:", e);
-  }
+  safeWriteJSON(MULTI_AUTH_FILE, multiAuth);
 }
 
 // Read state.json (usage, currentAccount, requestCount)
 function getState() {
-  if (!existsSync(STATE_FILE)) return {};
-  try {
-    return JSON.parse(readFileSync(STATE_FILE, "utf-8"));
-  } catch {
-    return {};
-  }
+  return safeReadJSON(STATE_FILE, {});
 }
 
 // Save state.json
 function saveState(state) {
-  try {
-    writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
-  } catch (e) {
-    console.error("[anthropic-multi-account] Failed to save state:", e);
-  }
+  safeWriteJSON(STATE_FILE, state);
 }
 
 /**
@@ -146,11 +159,24 @@ function normalizeThresholds(value, fallback) {
   return { session5h: fallback, weekly7d: fallback, weekly7dSonnet: fallback };
 }
 
-/**
- * Select account based on threshold logic with per-metric thresholds.
- * accounts[0] = primary (preferred), accounts[1..n] = fallbacks
- * Config from state.config or defaults
- */
+function resolveStaleMetrics(state) {
+  const usage = state.usage;
+  if (!usage) return false;
+  const now = Date.now();
+  let changed = false;
+  for (const accountName of Object.keys(usage)) {
+    for (const key of ['session5h', 'weekly7d', 'weekly7dSonnet']) {
+      const metric = usage[accountName]?.[key];
+      if (metric?.reset && metric.reset * 1000 < now && metric.utilization > 0) {
+        metric.utilization = 0;
+        metric.status = 'allowed';
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
 function selectThresholdAccount(accounts, state) {
   const config = state?.config || {};
   const thresholds = normalizeThresholds(config.threshold, 0.70);
@@ -303,7 +329,8 @@ export async function AnthropicAuthPlugin({ client }) {
               const accounts = multiAuth.accounts;
               const state = getState();
 
-               // Select account via threshold-based switching
+               resolveStaleMetrics(state);
+
                const account = selectThresholdAccount(accounts, state);
                if (!account) {
                  throw new Error("No accounts configured for multi-account");
