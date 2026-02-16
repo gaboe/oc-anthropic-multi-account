@@ -1,6 +1,6 @@
 {
   "name": "oc-anthropic-multi-account",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "type": "module",
   "description": "OpenCode plugin for managing multiple Anthropic Max accounts with automatic failover based on rate limit utilization",
   "main": "dist/index.js",
