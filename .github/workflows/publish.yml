@@ -20,7 +20,8 @@ jobs:
       - run: bun install
       - run: bun run build
       - name: Verify build output
-        run: test -f dist/index.js || (echo "ERROR: dist/index.js missing" && exit 1)
+        run: |
+          test -f dist/index.js || (echo "ERROR: dist/index.js missing" && exit 1)
 
   publish:
     runs-on: ubuntu-latest
