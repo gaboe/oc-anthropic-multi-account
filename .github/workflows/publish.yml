@@ -71,7 +71,7 @@ jobs:
             echo "" >> $GITHUB_OUTPUT
             echo "$NOTES" >> $GITHUB_OUTPUT
             echo "" >> $GITHUB_OUTPUT
-            echo "**Full Changelog**: https://github.com/gaboe/anthropic-multi-account/compare/${PREVIOUS_TAG}...${{ steps.tag.outputs.tag }}" >> $GITHUB_OUTPUT
+            echo "**Full Changelog**: https://github.com/gaboe/oc-anthropic-multi-account/compare/${PREVIOUS_TAG}...${{ steps.tag.outputs.tag }}" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           fi
 

@@ -32,12 +32,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gaboe/anthropic-multi-account.git"
+    "url": "git+https://github.com/gaboe/oc-anthropic-multi-account.git"
   },
   "bugs": {
-    "url": "https://github.com/gaboe/anthropic-multi-account/issues"
+    "url": "https://github.com/gaboe/oc-anthropic-multi-account/issues"
   },
-  "homepage": "https://github.com/gaboe/anthropic-multi-account#readme",
+  "homepage": "https://github.com/gaboe/oc-anthropic-multi-account#readme",
   "dependencies": {
     "@openauthjs/openauth": "^0.4.3"
   }
