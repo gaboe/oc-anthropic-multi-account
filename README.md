@@ -6,30 +6,21 @@ Never hit a Claude rate limit again with proactive multi-account switching for O
 
 ## Installation
 
-### Option 1: npm (Recommended)
+### 1. Add plugin to OpenCode config
 
-Install the plugin via bun:
+Add to your `opencode.json` (global or project-level):
 
-```bash
-bun add oc-anthropic-multi-account
+```json
+{
+  "plugin": [
+    "oc-anthropic-multi-account@latest"
+  ]
+}
 ```
 
-Then add `oc-anthropic-multi-account` to your OpenCode configuration plugins list.
+OpenCode will install the plugin automatically on next launch.
 
-### Option 2: Development
-
-Clone the repository and symlink it to your OpenCode plugins directory:
-
-```bash
-git clone git@github.com:gaboe/oc-anthropic-multi-account.git
-cd oc-anthropic-multi-account
-bun install
-
-mkdir -p ~/.config/opencode/plugins
-ln -s $(pwd) ~/.config/opencode/plugins/oc-anthropic-multi-account
-```
-
-### 3. Disable default Anthropic plugin
+### 2. Disable default Anthropic plugin
 
 Add this to your `~/.zshrc` or `~/.bashrc`:
 
@@ -39,11 +30,17 @@ export OPENCODE_DISABLE_DEFAULT_PLUGINS=true
 
 Without this, the built-in Anthropic plugin will override the custom fetch wrapper.
 
-### 4. Configure accounts
+### 3. Configure accounts
 
-The CLI (`src/cli.ts`) isn't bundled in the npm package. To add accounts or view usage, you must clone the repository as shown in the Development section.
+The CLI (`src/cli.ts`) isn't bundled in the npm package. Clone the repo to use it:
 
-Add accounts using the CLI (the first account added is the primary):
+```bash
+git clone git@github.com:gaboe/oc-anthropic-multi-account.git
+cd oc-anthropic-multi-account
+bun install
+```
+
+Add accounts (the first account added is the primary):
 
 ```bash
 bun src/cli.ts add primary
@@ -76,7 +73,7 @@ Tokens are stored in `~/.local/share/opencode/multi-account-auth.json`:
 Tokens are automatically refreshed when expired.
 </details>
 
-### 5. Restart OpenCode
+### 4. Restart OpenCode
 
 ```bash
 opencode
