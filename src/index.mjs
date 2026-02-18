@@ -20,6 +20,59 @@ function readJsonWithFallback(filePaths, fallback) {
   return { data: fallback, sourcePath: null };
 }
 
+function normalizeAccountFields(account) {
+  if (!account || typeof account !== "object") {
+    return account;
+  }
+
+  const normalized = { ...account };
+  let changed = false;
+
+  if ((!normalized.access || typeof normalized.access !== "string") && typeof normalized.accessToken === "string") {
+    normalized.access = normalized.accessToken;
+    changed = true;
+  }
+
+  if ((!normalized.refresh || typeof normalized.refresh !== "string") && typeof normalized.refreshToken === "string") {
+    normalized.refresh = normalized.refreshToken;
+    changed = true;
+  }
+
+  if (typeof normalized.expires !== "number") {
+    if (typeof normalized.expiresAt === "number" && Number.isFinite(normalized.expiresAt)) {
+      normalized.expires = normalized.expiresAt;
+      changed = true;
+    } else if (typeof normalized.expiresAt === "string") {
+      const parsed = Date.parse(normalized.expiresAt);
+      if (Number.isFinite(parsed)) {
+        normalized.expires = parsed;
+        changed = true;
+      }
+    }
+  }
+
+  return changed ? normalized : account;
+}
+
+function normalizeMultiAuthShape(multiAuth) {
+  if (!multiAuth || typeof multiAuth !== "object" || !Array.isArray(multiAuth.accounts)) {
+    return { value: multiAuth, changed: false };
+  }
+
+  let changed = false;
+  const accounts = multiAuth.accounts.map((account) => {
+    const normalized = normalizeAccountFields(account);
+    if (normalized !== account) changed = true;
+    return normalized;
+  });
+
+  if (!changed) {
+    return { value: multiAuth, changed: false };
+  }
+
+  return { value: { ...multiAuth, accounts }, changed: true };
+}
+
 // Safe JSON read with .bak fallback
 function safeReadJSON(filePath, fallback) {
   for (const path of [filePath, filePath + '.bak']) {
@@ -59,11 +112,13 @@ function getMultiAuth() {
     null
   );
 
-  if ((sourcePath === LEGACY_MULTI_AUTH_FILE_CONFIG || sourcePath === LEGACY_MULTI_AUTH_FILE) && data) {
-    saveMultiAuth(data);
+  const normalized = normalizeMultiAuthShape(data);
+
+  if (normalized.value && ((sourcePath === LEGACY_MULTI_AUTH_FILE_CONFIG || sourcePath === LEGACY_MULTI_AUTH_FILE) || normalized.changed)) {
+    saveMultiAuth(normalized.value);
   }
 
-  return data;
+  return normalized.value;
 }
 
 // Save multi-account-auth.json
