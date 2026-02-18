@@ -73,6 +73,62 @@ function normalizeMultiAuthShape(multiAuth) {
   return { value: { ...multiAuth, accounts }, changed: true };
 }
 
+function getAccountExpiry(account) {
+  const normalized = normalizeAccountFields(account);
+  if (typeof normalized?.expires === "number" && Number.isFinite(normalized.expires)) {
+    return normalized.expires;
+  }
+  return 0;
+}
+
+function hasRefreshToken(account) {
+  return typeof account?.refresh === "string" && account.refresh.length > 0;
+}
+
+function pickPreferredAccount(current, candidate) {
+  if (!current) return candidate;
+
+  const currentHasRefresh = hasRefreshToken(current);
+  const candidateHasRefresh = hasRefreshToken(candidate);
+
+  if (candidateHasRefresh && !currentHasRefresh) {
+    return candidate;
+  }
+
+  if (getAccountExpiry(candidate) > getAccountExpiry(current)) {
+    return candidate;
+  }
+
+  return current;
+}
+
+function mergeMultiAuthSources(sourceDataList) {
+  const mergedByName = new Map();
+  let requestCount = 0;
+
+  for (const source of sourceDataList) {
+    if (!source || !Array.isArray(source.accounts)) continue;
+
+    if (typeof source.requestCount === "number" && source.requestCount > requestCount) {
+      requestCount = source.requestCount;
+    }
+
+    for (const rawAccount of source.accounts) {
+      const account = normalizeAccountFields(rawAccount);
+      if (!account?.name) continue;
+      const current = mergedByName.get(account.name);
+      mergedByName.set(account.name, pickPreferredAccount(current, account));
+    }
+  }
+
+  if (mergedByName.size === 0) return null;
+
+  return {
+    accounts: Array.from(mergedByName.values()),
+    requestCount,
+  };
+}
+
 // Safe JSON read with .bak fallback
 function safeReadJSON(filePath, fallback) {
   for (const path of [filePath, filePath + '.bak']) {
@@ -107,18 +163,35 @@ function safeWriteJSON(filePath, data) {
 
 // Read multi-account-auth.json (separate file for multi-account tokens)
 function getMultiAuth() {
-  const { data, sourcePath } = readJsonWithFallback(
-    [MULTI_AUTH_FILE, LEGACY_MULTI_AUTH_FILE_CONFIG, LEGACY_MULTI_AUTH_FILE],
-    null
-  );
+  const sourcePaths = [
+    MULTI_AUTH_FILE,
+    LEGACY_MULTI_AUTH_FILE_CONFIG,
+    LEGACY_MULTI_AUTH_FILE,
+  ];
 
-  const normalized = normalizeMultiAuthShape(data);
+  const sources = [];
 
-  if (normalized.value && ((sourcePath === LEGACY_MULTI_AUTH_FILE_CONFIG || sourcePath === LEGACY_MULTI_AUTH_FILE) || normalized.changed)) {
-    saveMultiAuth(normalized.value);
+  for (const sourcePath of sourcePaths) {
+    const data = safeReadJSON(sourcePath, null);
+    if (!data || typeof data !== "object") continue;
+
+    const normalized = normalizeMultiAuthShape(data);
+    if (!normalized.value || !Array.isArray(normalized.value.accounts)) continue;
+    sources.push({ sourcePath, data: normalized.value });
   }
 
-  return normalized.value;
+  if (sources.length === 0) return null;
+
+  const merged = mergeMultiAuthSources(sources.map((source) => source.data));
+  if (!merged) return null;
+
+  const canonical = sources.find((source) => source.sourcePath === MULTI_AUTH_FILE)?.data ?? null;
+
+  if (!canonical || JSON.stringify(canonical) !== JSON.stringify(merged)) {
+    saveMultiAuth(merged);
+  }
+
+  return merged;
 }
 
 // Save multi-account-auth.json
@@ -379,6 +452,46 @@ function selectThresholdAccount(accounts, state) {
   }
 }
 
+async function ensureFreshAccountToken(account, multiAuth) {
+  if (account.access && account.expires > Date.now()) {
+    return { ok: true };
+  }
+
+  const response = await fetch(
+    "https://console.anthropic.com/v1/oauth/token",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        grant_type: "refresh_token",
+        refresh_token: account.refresh,
+        client_id: CLIENT_ID,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    return {
+      ok: false,
+      status: response.status,
+    };
+  }
+
+  const json = await response.json();
+  account.access = json.access_token;
+  account.refresh = json.refresh_token;
+  account.expires = Date.now() + json.expires_in * 1000;
+  account.accessToken = account.access;
+  account.refreshToken = account.refresh;
+  account.expiresAt = account.expires;
+
+  saveMultiAuth(multiAuth);
+
+  return { ok: true };
+}
+
 /**
  * @type {import('@opencode-ai/plugin').Plugin}
  */
@@ -438,7 +551,7 @@ export async function AnthropicAuthPlugin({ client }) {
                ensureAllAccountsInState(accounts, state);
                resolveStaleMetrics(state);
 
-               const account = selectThresholdAccount(accounts, state);
+               let account = selectThresholdAccount(accounts, state);
                if (!account) {
                  throw new Error("No accounts configured for multi-account");
                }
@@ -451,33 +564,25 @@ export async function AnthropicAuthPlugin({ client }) {
                  state.lastPrimaryCheck = Date.now();
                }
 
-               // Check if token needs refresh
-              if (!account.access || account.expires < Date.now()) {
-                const response = await fetch(
-                  "https://console.anthropic.com/v1/oauth/token",
-                  {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                      grant_type: "refresh_token",
-                      refresh_token: account.refresh,
-                      client_id: CLIENT_ID,
-                    }),
-                  },
-                );
-                if (!response.ok) {
-                  throw new Error(`Token refresh failed for ${account.name}: ${response.status}`);
-                }
-                const json = await response.json();
-                account.access = json.access_token;
-                account.refresh = json.refresh_token;
-                account.expires = Date.now() + json.expires_in * 1000;
+               // Refresh account token, fallback to other account on token failure.
+               const attemptedAccounts = new Set();
+               while (true) {
+                 const refreshResult = await ensureFreshAccountToken(account, multiAuth);
+                 if (refreshResult.ok) break;
 
-                // Save updated tokens to multi-account-auth.json
-                saveMultiAuth(multiAuth);
-              }
+                 attemptedAccounts.add(account.name);
+                 const fallback = accounts.find((candidate) => !attemptedAccounts.has(candidate.name));
+                 if (!fallback) {
+                   throw new Error(`Token refresh failed for ${account.name}: ${refreshResult.status}`);
+                 }
+
+                 console.warn(`[multi-account] refresh failed for ${account.name} (${refreshResult.status}), trying ${fallback.name}`);
+                 account = fallback;
+                 state.currentAccount = account.name;
+                 if (account.name !== previousAccount && account.name !== primaryName) {
+                   state.lastPrimaryCheck = Date.now();
+                 }
+               }
 
               // Increment request counter
               state.requestCount = (state.requestCount || 0) + 1;
