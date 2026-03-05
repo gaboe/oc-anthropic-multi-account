@@ -580,6 +580,57 @@ async function refreshToken(account: any): Promise<string | null> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Rate-limit header parsing (mirrors index.mjs updateMetric logic)
+// Header prefixes:  anthropic-ratelimit-unified-{5h,7d,7d_sonnet}-{utilization,reset,status}
+// ---------------------------------------------------------------------------
+
+type QuotaMetric = { utilization: number; reset: number | null; status: string };
+type QuotaSnapshot = { session5h: QuotaMetric | null; weekly7d: QuotaMetric | null; weekly7dSonnet: QuotaMetric | null };
+
+function parseRateLimitHeaders(res: Response): QuotaSnapshot | null {
+  function parseMetric(prefix: string): QuotaMetric | null {
+    const rawUtil = res.headers.get(`${prefix}-utilization`);
+    const rawReset = res.headers.get(`${prefix}-reset`);
+    const rawStatus = res.headers.get(`${prefix}-status`);
+    if (rawUtil === null && rawReset === null && rawStatus === null) return null;
+    return {
+      utilization: rawUtil !== null ? (parseFloat(rawUtil) || 0) : 0,
+      reset: rawReset !== null ? (parseInt(rawReset, 10) || null) : null,
+      status: rawStatus ?? 'unknown'
+    };
+  }
+
+  const session5h = parseMetric('anthropic-ratelimit-unified-5h');
+  const weekly7d = parseMetric('anthropic-ratelimit-unified-7d');
+  const weekly7dSonnet = parseMetric('anthropic-ratelimit-unified-7d_sonnet');
+  if (!session5h && !weekly7d && !weekly7dSonnet) return null;
+  return { session5h, weekly7d, weekly7dSonnet };
+}
+
+function updateUsageState(alias: string, quota: QuotaSnapshot): void {
+  const state = loadState();
+  state.usage = state.usage || {};
+  const prev = state.usage[alias] || {};
+
+  function mergeMetric(prevMetric: any, newMetric: QuotaMetric | null) {
+    if (!newMetric) return prevMetric || { utilization: 0, reset: null, status: 'allowed' };
+    return {
+      utilization: newMetric.utilization ?? (prevMetric?.utilization ?? 0),
+      reset: newMetric.reset ?? (prevMetric?.reset ?? null),
+      status: newMetric.status ?? (prevMetric?.status ?? 'unknown')
+    };
+  }
+
+  state.usage[alias] = {
+    session5h: mergeMetric(prev.session5h, quota.session5h),
+    weekly7d: mergeMetric(prev.weekly7d, quota.weekly7d),
+    weekly7dSonnet: mergeMetric(prev.weekly7dSonnet, quota.weekly7dSonnet),
+    timestamp: new Date().toISOString()
+  };
+  saveState(state);
+}
+
 async function cmdPing(alias: string) {
   try {
     const accounts = loadAccounts();
@@ -619,7 +670,12 @@ async function cmdPing(alias: string) {
     });
 
     if (res.ok) {
-      console.log(JSON.stringify({ status: "ok", alias }));
+      // Parse rate-limit headers and save usage to state (same headers as index.mjs)
+      const quota = parseRateLimitHeaders(res);
+      if (quota) {
+        updateUsageState(alias, quota);
+      }
+      console.log(JSON.stringify({ status: "ok", alias, quota: quota ?? undefined }));
       return;
     }
 
