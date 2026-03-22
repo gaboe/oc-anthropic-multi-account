@@ -4,6 +4,8 @@ import { homedir } from "os";
 import { join, dirname } from "path";
 
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
+const CLAUDE_CLI_USER_AGENT = "claude-cli/2.1.2 (external, cli)";
 const AUTH_FILE = join(homedir(), ".local/share/opencode/auth.json");
 const CONFIG_DIR = join(homedir(), ".config/opencode");
 const MULTI_AUTH_FILE = join(CONFIG_DIR, "anthropic-multi-account-accounts.json");
@@ -218,6 +220,26 @@ function saveState(state) {
   safeWriteJSON(STATE_FILE, state);
 }
 
+function createOAuthTokenRequestInit(params) {
+  const body = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value !== "undefined" && value !== null) {
+      body.set(key, String(value));
+    }
+  }
+
+  return {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+      "User-Agent": CLAUDE_CLI_USER_AGENT,
+    },
+    body: body.toString(),
+  };
+}
+
 /**
  * @param {"max" | "console"} mode
  */
@@ -254,20 +276,14 @@ async function authorize(mode) {
  */
 async function exchange(code, verifier) {
   const splits = code.split("#");
-  const result = await fetch("https://console.anthropic.com/v1/oauth/token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const result = await fetch(OAUTH_TOKEN_URL, createOAuthTokenRequestInit({
       code: splits[0],
       state: splits[1],
       grant_type: "authorization_code",
       client_id: CLIENT_ID,
       redirect_uri: "https://console.anthropic.com/oauth/code/callback",
       code_verifier: verifier,
-    }),
-  });
+    }));
   if (!result.ok)
     return {
       type: "failed",
@@ -474,18 +490,12 @@ async function ensureFreshAccountToken(account, multiAuth) {
   }
 
   const response = await fetch(
-    "https://console.anthropic.com/v1/oauth/token",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        grant_type: "refresh_token",
-        refresh_token: account.refresh,
-        client_id: CLIENT_ID,
-      }),
-    },
+    OAUTH_TOKEN_URL,
+    createOAuthTokenRequestInit({
+      grant_type: "refresh_token",
+      refresh_token: account.refresh,
+      client_id: CLIENT_ID,
+    }),
   );
 
   if (!response.ok) {
@@ -652,7 +662,7 @@ export async function AnthropicAuthPlugin({ client }) {
               requestHeaders.set("anthropic-beta", mergedBetas);
               requestHeaders.set(
                 "user-agent",
-                "claude-cli/2.1.2 (external, cli)",
+                CLAUDE_CLI_USER_AGENT,
               );
               requestHeaders.delete("x-api-key");
 
@@ -897,18 +907,12 @@ export async function AnthropicAuthPlugin({ client }) {
               if (auth.type !== "oauth") return fetch(input, init);
               if (!auth.access || auth.expires < Date.now()) {
                 const response = await fetch(
-                  "https://console.anthropic.com/v1/oauth/token",
-                  {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                      grant_type: "refresh_token",
-                      refresh_token: auth.refresh,
-                      client_id: CLIENT_ID,
-                    }),
-                  },
+                  OAUTH_TOKEN_URL,
+                  createOAuthTokenRequestInit({
+                    grant_type: "refresh_token",
+                    refresh_token: auth.refresh,
+                    client_id: CLIENT_ID,
+                  }),
                 );
                 if (!response.ok) {
                   throw new Error(`Token refresh failed: ${response.status}`);
@@ -976,7 +980,7 @@ export async function AnthropicAuthPlugin({ client }) {
               requestHeaders.set("anthropic-beta", mergedBetas);
               requestHeaders.set(
                 "user-agent",
-                "claude-cli/2.1.2 (external, cli)",
+                CLAUDE_CLI_USER_AGENT,
               );
               requestHeaders.delete("x-api-key");
 

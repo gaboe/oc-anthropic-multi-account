@@ -10,6 +10,8 @@ import * as readline from "readline";
 import { Effect, Option } from "effect";
 
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
+const CLAUDE_CLI_USER_AGENT = "claude-cli/2.1.2 (external, cli)";
 const CONFIG_DIR = join(homedir(), ".config/opencode");
 const MULTI_AUTH_FILE = join(CONFIG_DIR, "anthropic-multi-account-accounts.json");
 const LEGACY_MULTI_AUTH_FILE_CONFIG = join(CONFIG_DIR, "anthropic-multi-accounts.json");
@@ -18,6 +20,26 @@ const STATE_FILE = join(CONFIG_DIR, "anthropic-multi-account-state.json");
 const LEGACY_STATE_FILE = join(homedir(), ".local/share/opencode/multi-account-state.json");
 
 const DEFAULTS = { threshold: 0.70, checkInterval: 3600000 };
+
+function createOAuthTokenRequestInit(params: Record<string, string | undefined>) {
+  const body = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value !== "undefined") {
+      body.set(key, value);
+    }
+  }
+
+  return {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+      "User-Agent": CLAUDE_CLI_USER_AGENT,
+    },
+    body: body.toString(),
+  };
+}
 
 type PerMetric = { session5h: number; weekly7d: number; weekly7dSonnet: number };
 
@@ -508,18 +530,14 @@ async function cmdAdd(args: string[]) {
 
   console.log("⏳ Exchanging code for tokens...");
 
-  const response = await fetch("https://console.anthropic.com/v1/oauth/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  const response = await fetch(OAUTH_TOKEN_URL, createOAuthTokenRequestInit({
       code,
       state: verifier,
       grant_type: "authorization_code",
       client_id: CLIENT_ID,
       redirect_uri: "https://console.anthropic.com/oauth/code/callback",
       code_verifier: verifier,
-    }),
-  });
+    }));
 
   if (!response.ok) {
     const text = await response.text();
@@ -550,15 +568,11 @@ async function refreshToken(account: any): Promise<string | null> {
   if (account.access && account.expires > Date.now()) return null;
   if (!account.refresh) return "No refresh token available";
   try {
-    const res = await fetch("https://console.anthropic.com/v1/oauth/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const res = await fetch(OAUTH_TOKEN_URL, createOAuthTokenRequestInit({
         grant_type: "refresh_token",
         refresh_token: account.refresh,
         client_id: CLIENT_ID,
-      }),
-    });
+      }));
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       return `Token refresh failed (${res.status}): ${body.slice(0, 200)}`;
@@ -726,18 +740,14 @@ async function cmdReauth(alias: string, callbackUrl?: string, verifier?: string)
       code = callbackUrl;
     }
 
-    const response = await fetch("https://console.anthropic.com/v1/oauth/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const response = await fetch(OAUTH_TOKEN_URL, createOAuthTokenRequestInit({
         code,
         state: verifier,
         grant_type: "authorization_code",
         client_id: CLIENT_ID,
         redirect_uri: "https://console.anthropic.com/oauth/code/callback",
         code_verifier: verifier,
-      }),
-    });
+      }));
 
     if (!response.ok) {
       const text = await response.text();
