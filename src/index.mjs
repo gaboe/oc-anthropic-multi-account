@@ -275,6 +275,16 @@ async function authorize(mode) {
  * @param {string} verifier
  */
 async function exchange(code, verifier) {
+  // Accept both full callback URL and raw code
+  try {
+    const url = new URL(code);
+    const codeParam = url.searchParams.get("code");
+    if (codeParam) {
+      code = codeParam;
+    }
+  } catch {
+    // Not a URL — use as-is
+  }
   const splits = code.split("#");
   const result = await fetch(OAUTH_TOKEN_URL, createOAuthTokenRequestInit({
       code: splits[0],
@@ -1112,7 +1122,7 @@ export async function AnthropicAuthPlugin({ client }) {
             const { url, verifier } = await authorize("max");
             return {
               url: url,
-              instructions: "Paste the authorization code here: ",
+              instructions: "Paste the callback URL or authorization code here: ",
               method: "code",
               callback: async (code) => {
                 const credentials = await exchange(code, verifier);
@@ -1128,7 +1138,7 @@ export async function AnthropicAuthPlugin({ client }) {
             const { url, verifier } = await authorize("console");
             return {
               url: url,
-              instructions: "Paste the authorization code here: ",
+              instructions: "Paste the callback URL or authorization code here: ",
               method: "code",
               callback: async (code) => {
                 const credentials = await exchange(code, verifier);
