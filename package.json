@@ -14,7 +14,7 @@
     "build": "bun build src/index.mjs --outfile dist/index.js --format esm --target node && bun build src/cli.ts --outfile dist/cli.js --format esm --target bun",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run clean && bun run build",
-    "postinstall": "node postinstall.mjs || true"
+
   },
   "files": [
     "dist",
