@@ -24,9 +24,15 @@ OpenCode will install the plugin automatically on next launch.
 
 Add this to your `~/.zshrc` or `~/.bashrc`:
 
+MacOS
 ```bash
 export OPENCODE_DISABLE_DEFAULT_PLUGINS=true
 ```
+Windows
+```bash
+setx OPENCODE_DISABLE_DEFAULT_PLUGINS true #spustit v CMD
+```
+
 
 Without this, the built-in Anthropic plugin will override the custom fetch wrapper.
 
